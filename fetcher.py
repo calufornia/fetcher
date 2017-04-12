@@ -1,9 +1,11 @@
 import time
 from celery import Celery
 import requests
+import redis
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+r = redis.StrictRedis(host='localhost', port=6379, db=0)
 celery = Celery('fetcher', backend='amqp', broker='amqp://')
 
 
@@ -18,21 +20,24 @@ def add_job():
 def get_job(key):
     job = celery.AsyncResult(key)
 
-    if job.ready():
+    if job is None:
+        status = 'Not a valid key'
+    elif job.ready():
         status = 'Done'
         results = job.get()
+        if r.get(key) is None:
+            r.set(key, results)
     else:
         status = 'Not Done'
-        results = None
 
-    return jsonify({'key': key, 'status': status, 'results': results})
+    return jsonify({'key': key, 'status': status, 'results': r.get(key)})
 
 
 @celery.task
 def url_get(url):
     # time.sleep(60)  # Testing Purposes
-    r = requests.get(url)
-    return r.text
+    results = requests.get(url)
+    return results.text
 
 
 if __name__ == '__main__':
